@@ -1,5 +1,6 @@
 from core.claude_client import ClaudeClient
 from memory.vector_store import VectorStore
+from ingestion.pc_monitor import PCMonitor
 
 SYSTEM_PROMPT = """
 You are JARVIS — a personal AI built exclusively for Anady.
@@ -18,26 +19,36 @@ VOICE — you speak out loud, so:
 - Write exactly how you'd say it out loud.
 - Natural sentences only.
 
-You will be given relevant memories from past conversations.
-Use them naturally — like you actually remember, not like you're reading from a file.
+You will be given relevant memories from past conversations and 
+Anady's current PC activity. Use both naturally in your responses.
 """
 
 class Brain:
     def __init__(self):
         self.client = ClaudeClient()
         self.memory = VectorStore()
+        self.monitor = PCMonitor()
+        self.monitor.start()
         self.conversation_history = []
 
     def chat(self, user_input):
-        # Search memory for anything relevant
+        # Get relevant memories
         relevant_memories = self.memory.search(user_input)
 
-        # Build context with memories injected
+        # Get PC activity
+        pc_summary = self.monitor.get_summary()
+
+        # Build context
+        context_parts = []
+
         if relevant_memories:
             memory_context = "Relevant memories:\n" + "\n".join(f"- {m}" for m in relevant_memories)
-            augmented_input = f"{memory_context}\n\nUser says: {user_input}"
-        else:
-            augmented_input = user_input
+            context_parts.append(memory_context)
+
+        context_parts.append(f"Current PC activity: {pc_summary}")
+        context_parts.append(f"User says: {user_input}")
+
+        augmented_input = "\n\n".join(context_parts)
 
         self.conversation_history.append({
             "role": "user",
@@ -45,11 +56,10 @@ class Brain:
         })
 
         response = self.client.think(
-            messages=self.conversation_history, 
+            messages=self.conversation_history,
             system_prompt=SYSTEM_PROMPT
         )
 
-        # Save both sides to memory
         self.memory.save(user_input, metadata={"role": "user"})
         self.memory.save(response, metadata={"role": "jarvis"})
 
